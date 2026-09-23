@@ -1,0 +1,12 @@
+# setup.sh output (not committed)
+venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.env

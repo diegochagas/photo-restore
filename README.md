@@ -1,0 +1,139 @@
+# photo-restore
+
+An agent skill that restores scanned photo prints on a home PC, for free and
+offline: water and emulsion damage, stains, scratches, creases and cut
+corners are repainted by a local image-edit model, but **only inside the
+damaged areas** — every undamaged pixel, every face, is the scan's own —
+and faded or colour-cast prints get an automatic colour fix. Built to work
+through the CSV of a photo-library damage scan (tiers Severe / Moderate /
+Light / Digital), but any image or folder works.
+
+> Tailored to this machine (an NVIDIA GPU with 6 GB, ComfyUI with FLUX.2
+> klein 4B and Qwen-Image-Edit-2511). Treat it as an example and adapt.
+
+## How a print is restored
+
+1. The whole scan goes to the model with a "repair this damaged print"
+   instruction (FLUX.2 klein, ~30 s at 1 MP; Qwen-Image-Edit as the
+   alternative, ~100 s).
+2. The output is aligned to the original (ECC affine) and its colours
+   matched to the original (per-channel linear fit on the pixels the model
+   left alone).
+3. Where the two still differ strongly, the model repaired something: that
+   is the damage mask. Regions are numbered on `work/<name>.regions.jpg` so
+   the agent (and you) can see exactly what will change, and drop, include
+   or add regions and re-run without a new model call.
+4. The model's pixels replace the original only inside the mask, feathered.
+   The photo keeps its original colours (the pasted pixels were matched to
+   them). `--fix-color`, or `--mode color` for faded prints, adds
+   auto-levels + a half grey-world balance + light CLAHE (no AI). Results
+   are JPEG q95 with the original's EXIF.
+
+The agent looks at every `work/<name>.compare.jpg` (original | result)
+before a photo counts as done.
+
+## Examples
+
+Scans of family prints from the 1980s–90s, restored by the skill with the
+default settings (FLUX.2 klein, threshold 22). Left: the scan. Right: the
+result. In every case the faces and everything outside the red mask are
+the scan's own pixels.
+
+**Water damage and cut corners** — the emulsion lifted off in white
+blotches and the print had two corners cut. The blotches are repainted,
+the corners extended; the faces were never inside the mask.
+
+![water damage and cut corners](restore-photos/examples/water-damage-cut-corners.jpg)
+
+**Emulsion loss along the edges** — a party print with the image layer
+gone around the borders. Only the borders change.
+
+![emulsion loss](restore-photos/examples/emulsion-loss-edges.jpg)
+
+**A print cut into a heart** — the pink scanner background outside the
+print is treated as missing picture and extended. Everything beyond the
+heart is invented by the model, which is what the agent must say when it
+reports such a photo.
+
+![heart-shaped print](restore-photos/examples/heart-cut-print.jpg)
+
+**Faded print, colour fix only** (`--mode color`, no model): auto levels,
+half grey-world balance, light contrast.
+
+![faded print](restore-photos/examples/faded-print-color-fix.jpg)
+
+## Layout
+
+```
+restore-photos/SKILL.md      what the agent reads: which script, which flags, the QC loop
+restore-photos/scripts/
+    select_photos.py         CSV -> <out>/<tier>/originals/ + manifest.csv
+    restore.py               model pass -> damage mask -> composite, original colours (--fix-color adds the fix; --mode color: colour only)
+    inpaint.py               native-resolution repaint of masked regions on big scans (--hires)
+    fix_color.py             the colour fix alone (auto levels, grey world, CLAHE, saturation)
+    fix_broken.py            re-save JPEGs with stream errors / truncated tails, EXIF kept
+    contact_sheet.py         before/after sheets for batch QC
+    comfy_client.py          ComfyUI HTTP client, klein + qwen workflows, --check
+setup.sh                     venv + config template
+```
+
+Results go to `~/Downloads/photo-restore/` (`PHOTO_RESTORE_OUT` or
+`--output` change the root); sources are never modified.
+
+## Setup
+
+```bash
+./setup.sh
+```
+
+creates `venv/` (OpenCV, numpy, Pillow) and an empty
+`~/.config/photo-restore/comfyui.env`:
+
+```
+COMFYUI_URL=        # default http://127.0.0.1:8188
+COMFYUI_SERVICE=    # systemd --user unit the scripts may start, e.g. comfyui
+```
+
+`exiftool` (package `libimage-exiftool-perl`) is optional but recommended:
+without it the restored files lose their date and camera tags.
+
+### Local AI models
+
+Not installed by this repo. ComfyUI needs, for `--backend klein` (default):
+`diffusion_models/flux-2-klein-4b-fp8.safetensors`,
+`text_encoders/qwen_3_4b.safetensors`, `vae/flux2-vae.safetensors`; for
+`--backend qwen`: the ComfyUI-GGUF custom node,
+`unet/qwen-image-edit-2511-Q4_K_M.gguf`,
+`text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors`,
+`vae/qwen_image_vae.safetensors`,
+`loras/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors`.
+`venv/bin/python restore-photos/scripts/comfy_client.py --check` tells which
+backend is ready.
+
+## Usage
+
+```bash
+# 1. copy the CSV's photos into a working folder, per tier
+venv/bin/python restore-photos/scripts/select_photos.py photos_needing_restoration.csv
+
+# 2. damaged prints: model + mask, original colours kept (add --fix-color for a faded one)
+venv/bin/python restore-photos/scripts/restore.py ~/Downloads/photo-restore/Severe/originals
+
+# 3. faded prints: colour only
+venv/bin/python restore-photos/scripts/restore.py ~/Downloads/photo-restore/Light/originals --mode color
+
+# 4. QC sheets
+venv/bin/python restore-photos/scripts/contact_sheet.py ~/Downloads/photo-restore/Light/originals ~/Downloads/photo-restore/Light/restored
+
+# fix one mask without a new model call: region 4 was a real hand, region 9 is damage under the threshold
+venv/bin/python restore-photos/scripts/restore.py ".../Severe/originals/x.jpg" --reuse-raw --drop 4 --include 9
+
+# broken JPEGs
+venv/bin/python restore-photos/scripts/fix_broken.py ".../Digital/originals/"*.jpg --crop-strip
+```
+
+The CSV needs the columns `priority,issues,file,full_path`.
+
+## License
+
+MIT
