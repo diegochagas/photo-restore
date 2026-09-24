@@ -5,7 +5,7 @@ but the model's pixels are used ONLY where the print is damaged - every
 undamaged pixel, every face, stays the original's. Then the colours are fixed.
 
     restore.py <image-or-folder>... [--mode full|color] [--backend klein|qwen]
-               [--output DIR] [--seed N] [--reuse-raw] [--threshold 22]
+               [--recursive] [--output DIR] [--seed N] [--reuse-raw] [--threshold 22]
                [--min-area 300] [--drop 3,5] [--include 2] [--add x,y,w,h]...
                [--fix-color] [--levels 1] [--wb 0.5] [--contrast 1.2] [--sat 1.1]
                [--hires] [--prompt "..."] [--force]
@@ -33,12 +33,14 @@ How the damage mask is made (mode full):
      4 px; original everywhere else, original colours. --hires re-runs the model on native-
      resolution crops of the masked regions for scans above ~1.3 MP.
 
-Results: <output>/restored/<name>.jpg (q95, EXIF copied from the original by
-exiftool) and <output>/work/<name>.raw.png / .mask.png / .regions.jpg /
-.compare.jpg. <output> defaults to <folder of the image>/.. when the image is
-in a folder named `originals` (the select_photos.py layout), else
-~/Downloads/photo-restore ($PHOTO_RESTORE_OUT). Sources are never modified;
-existing results are skipped unless --force.
+Results: <out>/restored/<name>.jpg (q95, EXIF copied from the original by
+exiftool), <out>/work/<name>.raw.png / .mask.png / .regions.jpg /
+.compare.jpg, and for a folder <out>/sheets/qc_NN.jpg (original | result,
+4 per sheet). <out> is ~/Downloads/photo-restore/<folder name> for a folder,
+~/Downloads/photo-restore for a loose image ($PHOTO_RESTORE_OUT replaces the
+root, --output names any directory), or <x> for images in <x>/originals/
+(the select_photos.py layout). Sources are never modified; existing results
+are skipped unless --force.
 """
 import argparse
 import glob
@@ -67,13 +69,22 @@ HIRES_MP = 1.3
 GROUP_PX = 20      # changed blobs closer than this form one region
 
 
-def out_root(image, arg=None):
+def out_root(image, arg=None, folder=None):
+    """Where a photo's restored/ and work/ go:
+    --output DIR                     -> DIR
+    <x>/originals/<name>             -> <x>            (the select_photos.py CSV layout)
+    an image given inside a folder   -> <root>/<folder name>
+    a loose image                    -> <root>
+    root = $PHOTO_RESTORE_OUT or ~/Downloads/photo-restore."""
     if arg:
         return os.path.abspath(os.path.expanduser(arg))
     d = os.path.dirname(os.path.abspath(image))
     if os.path.basename(d) == "originals":
         return os.path.dirname(d)
-    return os.path.abspath(os.path.expanduser(os.environ.get("PHOTO_RESTORE_OUT") or "~/Downloads/photo-restore"))
+    root = os.path.abspath(os.path.expanduser(os.environ.get("PHOTO_RESTORE_OUT") or "~/Downloads/photo-restore"))
+    if folder:
+        return os.path.join(root, os.path.basename(os.path.abspath(folder)))
+    return root
 
 
 def align(orig, gen):
@@ -210,21 +221,26 @@ def parse_boxes(items):
     return [tuple(int(v) for v in it.split(",")) for it in (items or [])]
 
 
-def collect(paths):
+def collect(paths, recursive=False):
+    """[(file, folder-or-None)] for images and folders; a folder's images
+    carry the folder so their results are grouped under its name."""
     files = []
     for p in paths:
-        p = os.path.expanduser(p)
+        p = os.path.expanduser(p.rstrip("/"))
         if os.path.isdir(p):
-            files += [f for f in sorted(glob.glob(os.path.join(p, "*"))) if f.lower().endswith(EXT)]
+            pattern = os.path.join(p, "**", "*") if recursive else os.path.join(p, "*")
+            for f in sorted(glob.glob(pattern, recursive=recursive)):
+                if f.lower().endswith(EXT) and os.path.isfile(f):
+                    files.append((f, p))
         elif os.path.isfile(p):
-            files.append(p)
+            files.append((p, None))
         else:
             print(f"not found: {p}", file=sys.stderr)
     return files
 
 
-def restore_one(src, a):
-    root = out_root(src, a.output)
+def restore_one(src, a, folder=None):
+    root = out_root(src, a.output, folder)
     rest_dir, work = os.path.join(root, "restored"), os.path.join(root, "work")
     os.makedirs(rest_dir, exist_ok=True)
     os.makedirs(work, exist_ok=True)
@@ -281,7 +297,9 @@ def restore_one(src, a):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("paths", nargs="+", help="images or folders (not recursed)")
+    ap.add_argument("paths", nargs="+", help="images and/or folders")
+    ap.add_argument("--recursive", action="store_true", help="also the sub-folders of a folder")
+    ap.add_argument("--no-sheets", action="store_true", help="skip the QC contact sheets after a folder run")
     ap.add_argument("--mode", choices=("full", "color"), default="full")
     ap.add_argument("--backend", choices=("klein", "qwen"), default="klein")
     ap.add_argument("--output")
@@ -303,13 +321,42 @@ def main():
     ap.add_argument("--sat", type=float, default=1.1)
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
-    files = collect(a.paths)
+    files = collect(a.paths, a.recursive)
     if not files:
         sys.exit("nothing to do")
-    if len(files) > 1 and (a.raw or a.drop or a.include or a.add or a.protect):
-        sys.exit("--raw/--drop/--include/--add/--protect apply to one image at a time")
-    for f in files:
-        restore_one(f, a)
+    if len(files) > 1 and (a.raw or a.drop or a.include or a.add or a.protect or a.prompt):
+        sys.exit("--raw/--drop/--include/--add/--protect/--prompt apply to one image at a time")
+    roots = {}
+    for f, folder in files:
+        restore_one(f, a, folder)
+        roots.setdefault(out_root(f, a.output, folder), []).append(f)
+    if not a.no_sheets:
+        for root, fs in roots.items():
+            if len(fs) > 1:
+                sheets(root)
+
+
+def sheets(root, per=4, width=1000):
+    """Stack work/*.compare.jpg into <root>/sheets/qc_NN.jpg for QC."""
+    work, out = os.path.join(root, "work"), os.path.join(root, "sheets")
+    comps = sorted(glob.glob(os.path.join(work, "*.compare.jpg")))
+    if not comps:
+        return
+    os.makedirs(out, exist_ok=True)
+    for old in glob.glob(os.path.join(out, "qc_*.jpg")):
+        os.remove(old)
+    for s in range(0, len(comps), per):
+        tiles = []
+        for k, f in enumerate(comps[s:s + per]):
+            im = cv2.imread(f)
+            im = cv2.resize(im, (width, round(im.shape[0] * width / im.shape[1])), interpolation=cv2.INTER_AREA)
+            label = np.full((22, width, 3), 60, np.uint8)
+            cv2.putText(label, f"{s + k + 1}. {os.path.basename(f)[:-12]}", (6, 16),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+            tiles += [label, im, np.full((4, width, 3), 60, np.uint8)]
+        p = os.path.join(out, f"qc_{s // per + 1:02d}.jpg")
+        cv2.imwrite(p, np.vstack(tiles), [cv2.IMWRITE_JPEG_QUALITY, 80])
+        print(f"sheet -> {p}")
 
 
 if __name__ == "__main__":

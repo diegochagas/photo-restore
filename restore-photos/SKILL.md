@@ -1,6 +1,6 @@
 ---
 name: restore-photos
-description: Restore scanned photo prints - water/emulsion damage, stains, scratches, cut corners repainted by a local image-edit model (FLUX.2 klein or Qwen-Image-Edit in ComfyUI, free, offline) but ONLY inside the damaged areas, every undamaged pixel and every face kept from the original; then automatic colour/contrast fix for faded or colour-cast prints; re-save of broken JPEGs. Works from a restoration CSV (tiers Severe/Moderate/Light/Digital) or on any image/folder. Results in ~/Downloads/photo-restore, sources never touched, the agent QCs every result with Diego. Use when Diego asks to "restore these photos/prints/scans", "fix the damaged photos from the report", "restaurar as fotos", "remove the white blotches / water damage", "fix the colours of the old photos", or points at the photos_needing_restoration.csv.
+description: Restore scanned photo prints - water/emulsion damage, stains, scratches, cut corners repainted by a local image-edit model (FLUX.2 klein or Qwen-Image-Edit in ComfyUI, free, offline) but ONLY inside the damaged areas, every undamaged pixel and every face kept from the original; then automatic colour/contrast fix for faded or colour-cast prints; re-save of broken JPEGs. Takes an image, several images or a folder of scans (optionally recursive), or a restoration CSV (tiers Severe/Moderate/Light/Digital). Results in ~/Downloads/photo-restore/<folder name>/, with QC contact sheets; sources never touched; the agent QCs every result with Diego. Use when Diego asks to "restore this photo / these photos / this folder of scans", "fix the damaged prints", "restaurar as fotos", "remove the white blotches / water damage", "fix the colours of the old photos", or points at a photos_needing_restoration.csv.
 ---
 
 # restore-photos — repair scanned prints, keep what is real
@@ -15,33 +15,52 @@ photo-restore checkout. All paths below are relative to it.
 
 | Script | Does |
 | --- | --- |
-| `select_photos.py <csv> [--tier ...]` | copies the CSV's photos into `<out>/<tier>/originals/`, writes `<out>/manifest.csv` |
-| `restore.py <image-or-folder>... [--mode full\|color]` | the restoration (model pass → damage mask → composite, original colours kept; `--fix-color` adds the colour fix; `--mode color` is the colour fix alone) |
-| `contact_sheet.py <originals> <restored>` | before/after sheets, 6 pairs each, for batch QC |
+| `restore.py <image-or-folder>... [--mode full\|color] [--recursive]` | the restoration (model pass → damage mask → composite, original colours kept; `--fix-color` adds the colour fix; `--mode color` is the colour fix alone). A folder run ends with QC sheets in `<out>/sheets/` |
+| `select_photos.py <csv> [--tier ...]` | CSV route: copies the CSV's photos into `<out>/<tier>/originals/`, writes `<out>/manifest.csv` |
+| `contact_sheet.py <originals> <restored>` | before/after sheets from two folders (when the results were moved around) |
 | `fix_broken.py <jpg>... [--crop-strip]` | re-saves JPEGs with data-stream errors / truncated tails, EXIF kept |
 | `inpaint.py <image> <mask> <out>` | native-resolution repaint of masked regions (big scans; `restore.py --hires` calls it) |
 | `fix_color.py <image> <out>` | the colour fix alone, with all its knobs |
 | `comfy_client.py --check` | is ComfyUI up, which backend has its models |
 
+## Arguments
+
+`/restore-photos <image-or-folder>... [what to do]`
+
+- `image-or-folder`: one image, several images, or a folder of scans
+  (`--recursive` for its sub-folders). A CSV from a damage scan (columns
+  `priority,issues,file,full_path`) is the other way in: `select_photos.py`
+  copies its photos per tier first. If nothing is given, ask.
+- what to do (optional): nothing = repair (mode full); "fix the colours" /
+  "faded" = `--mode color`; "repair and fix the colours" = `--fix-color`.
+
 ## Where results go
 
-`~/Downloads/photo-restore/` (`$PHOTO_RESTORE_OUT` replaces it, `--output`
-names another root). With the CSV layout: `<out>/<tier>/originals/` (copies),
-`<out>/<tier>/restored/<name>.jpg` (results, q95, EXIF copied from the
-original), `<out>/<tier>/work/` (`<name>.raw.png` model output,
-`<name>.mask.png`, `<name>.regions.jpg` numbered regions, `<name>.compare.jpg`
-original | result). For a loose image: `~/Downloads/photo-restore/restored/`
-+ `work/`. Sources (the Immich library, any folder) are never written to.
-Existing results are skipped, so a folder run resumes; `--force` redoes.
+Root `~/Downloads/photo-restore/` (`$PHOTO_RESTORE_OUT` replaces it,
+`--output` names any directory):
+
+| Input | Results |
+| --- | --- |
+| a folder `<name>/` | `<root>/<name>/restored/`, `<root>/<name>/work/`, `<root>/<name>/sheets/qc_NN.jpg` |
+| loose images | `<root>/restored/`, `<root>/work/` |
+| `<x>/<tier>/originals/` (CSV route) | `<x>/<tier>/restored/`, `work/`, `sheets/` |
+
+`restored/<name>.jpg` is the result (q95, EXIF copied from the original);
+`work/` holds `<name>.raw.png` (model output), `<name>.mask.png`,
+`<name>.regions.jpg` (numbered regions on the original) and
+`<name>.compare.jpg` (original | result); `sheets/` stacks the compare
+images 4 per sheet after a folder run (`--no-sheets` skips it). Sources
+(the Immich library, any folder) are never written to. Existing results are
+skipped, so a folder run resumes; `--force` redoes.
 
 ## Arguments Diego gives → what you run
 
 | Diego says | Run |
 | --- | --- |
+| "restore this photo / these photos / this folder" | `restore.py <path>...` (mode full; `--recursive` when he says "including sub-folders") |
+| "fix the colours", "the faded ones", the **Light** tier of a CSV | `restore.py <path> --mode color` (no model, ~1 s/photo) |
 | "restore the photos from the report / the CSV" | `select_photos.py <csv>` then, tier by tier, `restore.py <out>/Severe/originals` … (see Workflow) |
 | "only the severe ones", "the moderate and severe" | `select_photos.py <csv> --tier Severe,Moderate` |
-| "fix the colours", "the faded ones", the **Light** tier | `restore.py <folder> --mode color` (no model, ~1 s/photo) |
-| "restore this photo/folder" (no CSV) | `restore.py <path>` (mode full) |
 | "the sepia one should stay sepia", "don't neutralise the tone" | add `--wb 0` |
 | "too strong / too contrasty" | `--contrast 0.6` (0 = off), `--strength` is on `fix_color.py` only |
 | "repair and also fix the colours", a damaged print that is also faded | `--fix-color` (off by default: a repair keeps the original colours) |
@@ -59,22 +78,22 @@ klein is unavailable: ComfyUI must be running (`COMFYUI_SERVICE` in
 --user unit; `COMFYUI_URL` for another host) — tell Diego what is missing,
 never fall back to a paid service.
 
-1. `select_photos.py` the CSV (all tiers, or the tiers Diego named). Report:
-   copied / already there / missing.
-2. **Light tier, colour only:** `restore.py <out>/Light/originals --mode color`,
-   then `contact_sheet.py <out>/Light/originals <out>/Light/restored` and look
-   at every sheet. Typical fixes: `--wb 0` for a print whose tone is on purpose
-   (sepia, sunset), `--contrast 0.6` for a print that went harsh. Re-run those
-   single files with `--force`.
-3. **Severe and Moderate, one photo at a time in the beginning** (repair only,
-   original colours; add `--fix-color` only when Diego asks): run the first
-   photo alone, open its `work/<name>.compare.jpg` and `work/<name>.regions.jpg`,
-   and check (a) every damaged area is red in the regions image, (b) nothing
-   real is red — a face, a hand, a pattern the model "improved" — and (c) the
-   repaired areas look like the rest of the photo. Then run the rest of the
-   folder (15–30 s per photo with klein on the 0.3–1.2 MP scans of the
-   report; above ~10 photos run it in the background) and QC each compare sheet the same way.
-4. **Fixing a mask** (free, no model call — `--reuse-raw`):
+**A photo or a folder (the usual case):**
+
+1. Run the FIRST photo alone (`restore.py <that image> --output
+   <root>/<folder name>` so it lands with the rest), open its
+   `work/<name>.compare.jpg` and `work/<name>.regions.jpg`, and check
+   (a) every damaged area is red in the regions image, (b) nothing real is
+   red — a face, a hand, a pattern the model "improved" — and (c) the
+   repaired areas look like the rest of the photo. Fix the mask if needed
+   (step 3). This is where you learn whether the folder wants `--fix-color`
+   or a different `--wb`.
+2. Run the folder (15–30 s per photo with klein on 0.3–1.2 MP scans; above
+   ~10 photos run it in the background). Open every `sheets/qc_NN.jpg` and
+   judge each pair the same way. For `--mode color` the sheets are all there
+   is to check: watch for a print whose tone was on purpose (sepia, sunset)
+   and for cream/orange surfaces pushed to cyan.
+3. **Fixing one result** (free, no model call — `--reuse-raw`):
    - damage left untouched: it is under the threshold (white damage on white
      clothes is the usual case) → `--threshold 12` (measured: catches flakes on
      a white robe, but then a face or two show up as regions → `--drop` them;
@@ -93,10 +112,22 @@ never fall back to a paid service.
      people, and a cut print (heart, arch) comes back as a full rectangle with
      invented surroundings: that is the best any tool can do, and Diego must
      be told which photos had content invented, not just repaired.
-5. **Report per tier:** approved / fixed / flagged (photos you could not get
-   right; say what is wrong), and where the results are. Show Diego the
-   compare sheets of the photos you changed the most. Ask before touching
-   another tier only if he asked for one tier.
+   - colour fix too far (`--mode color` / `--fix-color`): `--wb 0.15–0.3` on
+     prints with a cream or orange dominant surface, `--wb 0` for sepia,
+     `--wb 1` for a real magenta/green cast, `--contrast 0` for harsh grain.
+   A single-image re-run rewrites only that photo's files; look at its new
+   `compare.jpg` rather than rebuilding the sheets.
+4. **Report:** approved / fixed / flagged (photos you could not get right;
+   say what is wrong and which ones had content invented), and where the
+   results are. Show Diego the compare sheets of the photos you changed the
+   most.
+
+**From a CSV:** `select_photos.py <csv>` (all tiers, or the tiers Diego
+named); report copied / already there / missing. Then per tier as above:
+**Light** with `--mode color`; **Severe** and **Moderate** in mode full,
+adding `--fix-color` to the Moderate prints whose CSV issue says "fading";
+**Digital** with `fix_broken.py` (see below). Ask before touching another
+tier only if he asked for one tier.
 
 ## What "only the damage changes" means
 

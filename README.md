@@ -1,12 +1,12 @@
 # photo-restore
 
 An agent skill that restores scanned photo prints on a home PC, for free and
-offline: water and emulsion damage, stains, scratches, creases and cut
-corners are repainted by a local image-edit model, but **only inside the
-damaged areas** — every undamaged pixel, every face, is the scan's own —
-and faded or colour-cast prints get an automatic colour fix. Built to work
-through the CSV of a photo-library damage scan (tiers Severe / Moderate /
-Light / Digital), but any image or folder works.
+offline: give it an image or a folder of scans and water and emulsion
+damage, stains, scratches, creases and cut corners are repainted by a local
+image-edit model, but **only inside the damaged areas** — every undamaged
+pixel, every face, is the scan's own. Faded or colour-cast prints get an
+automatic colour fix. A CSV from a photo-library damage scan (tiers Severe /
+Moderate / Light / Digital) is the other way in.
 
 > Tailored to this machine (an NVIDIA GPU with 6 GB, ComfyUI with FLUX.2
 > klein 4B and Qwen-Image-Edit-2511). Treat it as an example and adapt.
@@ -70,7 +70,8 @@ read as damage; a pale wash over a scene is left alone.
 restore-photos/SKILL.md      what the agent reads: which script, which flags, the QC loop
 restore-photos/scripts/
     select_photos.py         CSV -> <out>/<tier>/originals/ + manifest.csv
-    restore.py               model pass -> damage mask -> composite, original colours (--fix-color adds the fix; --mode color: colour only)
+    restore.py               image(s) or folder -> model pass -> damage mask -> composite, original colours; QC sheets per folder
+                             (--fix-color adds the colour fix; --mode color: colour only; --recursive)
     inpaint.py               native-resolution repaint of masked regions on big scans (--hires)
     fix_color.py             the colour fix alone (auto levels, grey world, CLAHE, saturation)
     fix_broken.py            re-save JPEGs with stream errors / truncated tails, EXIF kept
@@ -79,8 +80,11 @@ restore-photos/scripts/
 setup.sh                     venv + config template
 ```
 
-Results go to `~/Downloads/photo-restore/` (`PHOTO_RESTORE_OUT` or
-`--output` change the root); sources are never modified.
+Results go to `~/Downloads/photo-restore/<folder name>/` for a folder and
+`~/Downloads/photo-restore/` for loose images (`PHOTO_RESTORE_OUT` or
+`--output` change the root): `restored/` (JPEG q95, original EXIF),
+`work/` (model output, mask, numbered regions, original | result) and
+`sheets/` (QC contact sheets). Sources are never modified.
 
 ## Setup
 
@@ -115,17 +119,20 @@ backend is ready.
 ## Usage
 
 ```bash
-# 1. copy the CSV's photos into a working folder, per tier
+# a folder of scans (or one image, or several): repair, original colours kept
+venv/bin/python restore-photos/scripts/restore.py "~/Scans/Fotos da vovó"
+#   -> ~/Downloads/photo-restore/Fotos da vovó/{restored,work,sheets}/
+
+# damaged AND faded: repair, then the colour fix
+venv/bin/python restore-photos/scripts/restore.py "~/Scans/Fotos da vovó" --fix-color
+
+# faded only: colour fix, no model
+venv/bin/python restore-photos/scripts/restore.py "~/Scans/Fotos da vovó" --mode color
+
+# from a damage-scan CSV: copy per tier, then restore each tier
 venv/bin/python restore-photos/scripts/select_photos.py photos_needing_restoration.csv
-
-# 2. damaged prints: model + mask, original colours kept (add --fix-color for a faded one)
 venv/bin/python restore-photos/scripts/restore.py ~/Downloads/photo-restore/Severe/originals
-
-# 3. faded prints: colour only
 venv/bin/python restore-photos/scripts/restore.py ~/Downloads/photo-restore/Light/originals --mode color
-
-# 4. QC sheets
-venv/bin/python restore-photos/scripts/contact_sheet.py ~/Downloads/photo-restore/Light/originals ~/Downloads/photo-restore/Light/restored
 
 # fix one mask without a new model call: region 4 was a real hand, region 9 is damage under the threshold
 venv/bin/python restore-photos/scripts/restore.py ".../Severe/originals/x.jpg" --reuse-raw --drop 4 --include 9
@@ -134,7 +141,7 @@ venv/bin/python restore-photos/scripts/restore.py ".../Severe/originals/x.jpg" -
 venv/bin/python restore-photos/scripts/fix_broken.py ".../Digital/originals/"*.jpg --crop-strip
 ```
 
-The CSV needs the columns `priority,issues,file,full_path`.
+The CSV route needs the columns `priority,issues,file,full_path`.
 
 ## License
 
