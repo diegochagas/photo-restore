@@ -47,6 +47,7 @@ Existing results are skipped, so a folder run resumes; `--force` redoes.
 | "repair and also fix the colours", a damaged print that is also faded | `--fix-color` (off by default: a repair keeps the original colours) |
 | "use Qwen", "try the other model" | `--backend qwen` (~100 s/photo, changes faces more - klein is the default for a reason) |
 | "try another version" | `--seed <other>` (and `--force`) |
+| a light leak / burn (orange band, pale wash) the run left alone | run it in mode full (it may have been Light-tier, colour only); a strong orange band gets repainted, a pale wash over the scene does not — the models read it as light, and a prompt naming it (`--prompt`) did not help; say so |
 | "it's a big scan / keep it sharp" | `--hires` (only matters above ~1.3 MP) |
 | the **Digital** tier (broken files) | `fix_broken.py <files>`; `--crop-strip` for the truncated one with the grey strip |
 

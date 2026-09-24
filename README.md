@@ -57,10 +57,12 @@ reports such a photo.
 
 ![heart-shaped print](restore-photos/examples/heart-cut-print.jpg)
 
-**Faded print, colour fix only** (`--mode color`, no model): auto levels,
-half grey-world balance, light contrast.
+**Light leak and fading** — the orange band on the left is a light leak,
+repainted by the model; the colour fix (`--fix-color`) then removes the
+yellow cast. Light leaks are only repaired when they are strong enough to
+read as damage; a pale wash over a scene is left alone.
 
-![faded print](restore-photos/examples/faded-print-color-fix.jpg)
+![light leak and fading](restore-photos/examples/light-leak-and-fading.jpg)
 
 ## Layout
 

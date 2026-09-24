@@ -8,7 +8,7 @@ undamaged pixel, every face, stays the original's. Then the colours are fixed.
                [--output DIR] [--seed N] [--reuse-raw] [--threshold 22]
                [--min-area 300] [--drop 3,5] [--include 2] [--add x,y,w,h]...
                [--fix-color] [--levels 1] [--wb 0.5] [--contrast 1.2] [--sat 1.1]
-               [--hires] [--force]
+               [--hires] [--prompt "..."] [--force]
 
 --mode full (default): model pass -> damage mask -> composite. The colours
   stay the original's: the model's pixels are colour-matched to the scan
@@ -257,7 +257,7 @@ def restore_one(src, a):
     else:
         if not comfy_client.available(a.backend):
             sys.exit(f"{a.backend} is not available in ComfyUI - start it or fix the model files (see README)")
-        raw = comfy_client.edit(orig, PROMPT, a.backend, a.seed)
+        raw = comfy_client.edit(orig, a.prompt or PROMPT, a.backend, a.seed)
         cv2.imwrite(raw_path, raw)
     gen = match_colors(orig, align(orig, raw))
     labels, regions, _ = diff_regions(orig, gen, a.threshold, a.min_area)
@@ -295,6 +295,7 @@ def main():
     ap.add_argument("--add", action="append", help="x,y,w,h box to repaint (repeatable)")
     ap.add_argument("--protect", action="append", help="x,y,w,h box that keeps the original (repeatable)")
     ap.add_argument("--hires", action="store_true")
+    ap.add_argument("--prompt", help="replace the repair prompt entirely (single image)")
     ap.add_argument("--fix-color", action="store_true", help="mode full: also run the colour fix (off by default)")
     ap.add_argument("--levels", type=float, default=1.0)
     ap.add_argument("--wb", type=float, default=0.5)
