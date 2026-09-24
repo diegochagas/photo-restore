@@ -63,6 +63,15 @@ read as damage; a pale wash over a scene is left alone.
 
 ![light leak and fading](restore-photos/examples/light-leak-and-fading.jpg)
 
+## Skills
+
+| Skill | Scripts | What it does |
+| --- | --- | --- |
+| [`restore-photos`](restore-photos/) | `restore.py`, `inpaint.py`, `fix_color.py`, `fix_broken.py`, `contact_sheet.py`, `comfy_client.py`, `examples/` | `/restore-photos <image-or-folder>`: repairs scanned prints — water and emulsion damage, stains, scratches, creases, cut corners — with a local image-edit model (FLUX.2 klein by default, Qwen-Image-Edit with `--backend qwen`, both in ComfyUI, free, offline) and takes the model's pixels **only inside the damage mask**: the output is aligned and colour-matched to the scan, the areas where it still differs are the damage it repaired, and every other pixel, every face, stays the scan's own, in the scan's own colours. `--fix-color` adds an automatic colour fix after the repair; `--mode color` runs that fix alone on faded or colour-cast prints (no model, ~1 s/photo). A folder (`--recursive` for sub-folders) ends with QC contact sheets; the agent reviews every one and fixes a mask for free with `--reuse-raw` plus `--drop N` / `--include N` / `--add x,y,w,h` / `--protect x,y,w,h`, or rerolls with `--seed`. `fix_broken.py` re-saves JPEGs with a data-stream error or a truncated tail (`--crop-strip` removes the grey strip), EXIF kept. Results in `~/Downloads/photo-restore/<folder name>/`, sources never touched. |
+
+The `SKILL.md` documents the flags and a table of "what the user says →
+which flags to pass".
+
 ## Layout
 
 ```
@@ -112,7 +121,13 @@ Not installed by this repo. ComfyUI needs, for `--backend klein` (default):
 `vae/qwen_image_vae.safetensors`,
 `loras/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors`.
 `venv/bin/python restore-photos/scripts/comfy_client.py --check` tells which
-backend is ready.
+backend is ready. With `COMFYUI_SERVICE` set, the scripts start the server
+on demand but never stop it, so after a session it keeps the models in
+memory until you stop it yourself:
+
+```bash
+systemctl --user stop comfyui
+```
 
 ## Usage
 
