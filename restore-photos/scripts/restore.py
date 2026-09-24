@@ -38,9 +38,8 @@ exiftool), <out>/work/<name>.raw.png / .mask.png / .regions.jpg /
 .compare.jpg, and for a folder <out>/sheets/qc_NN.jpg (original | result,
 4 per sheet). <out> is ~/Downloads/photo-restore/<folder name> for a folder,
 ~/Downloads/photo-restore for a loose image ($PHOTO_RESTORE_OUT replaces the
-root, --output names any directory), or <x> for images in <x>/originals/
-(the select_photos.py layout). Sources are never modified; existing results
-are skipped unless --force.
+root, --output names any directory). Sources are never modified; existing
+results are skipped unless --force.
 """
 import argparse
 import glob
@@ -72,15 +71,11 @@ GROUP_PX = 20      # changed blobs closer than this form one region
 def out_root(image, arg=None, folder=None):
     """Where a photo's restored/ and work/ go:
     --output DIR                     -> DIR
-    <x>/originals/<name>             -> <x>            (the select_photos.py CSV layout)
     an image given inside a folder   -> <root>/<folder name>
     a loose image                    -> <root>
     root = $PHOTO_RESTORE_OUT or ~/Downloads/photo-restore."""
     if arg:
         return os.path.abspath(os.path.expanduser(arg))
-    d = os.path.dirname(os.path.abspath(image))
-    if os.path.basename(d) == "originals":
-        return os.path.dirname(d)
     root = os.path.abspath(os.path.expanduser(os.environ.get("PHOTO_RESTORE_OUT") or "~/Downloads/photo-restore"))
     if folder:
         return os.path.join(root, os.path.basename(os.path.abspath(folder)))

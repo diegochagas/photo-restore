@@ -6,7 +6,7 @@ strip; --crop-strip cuts those rows off instead of keeping them.
 
     fix_broken.py <image>... [--output DIR] [--crop-strip] [--quality 95]
 
-Results: <output>/<name>.jpg (default ~/Downloads/photo-restore/Digital/restored,
+Results: <output>/<name>.jpg (default ~/Downloads/photo-restore/restored,
 $PHOTO_RESTORE_OUT replaces the root). Sources are never modified.
 """
 import argparse
@@ -44,7 +44,7 @@ def main():
     ap.add_argument("--quality", type=int, default=95)
     a = ap.parse_args()
     root = os.path.expanduser(os.environ.get("PHOTO_RESTORE_OUT") or "~/Downloads/photo-restore")
-    out_dir = os.path.abspath(os.path.expanduser(a.output or os.path.join(root, "Digital", "restored")))
+    out_dir = os.path.abspath(os.path.expanduser(a.output or os.path.join(root, "restored")))
     os.makedirs(out_dir, exist_ok=True)
     have_exiftool = shutil.which("exiftool") is not None
     for src in a.images:

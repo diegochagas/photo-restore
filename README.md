@@ -5,8 +5,7 @@ offline: give it an image or a folder of scans and water and emulsion
 damage, stains, scratches, creases and cut corners are repainted by a local
 image-edit model, but **only inside the damaged areas** — every undamaged
 pixel, every face, is the scan's own. Faded or colour-cast prints get an
-automatic colour fix. A CSV from a photo-library damage scan (tiers Severe /
-Moderate / Light / Digital) is the other way in.
+automatic colour fix, and broken JPEG files are re-saved.
 
 > Tailored to this machine (an NVIDIA GPU with 6 GB, ComfyUI with FLUX.2
 > klein 4B and Qwen-Image-Edit-2511). Treat it as an example and adapt.
@@ -69,7 +68,6 @@ read as damage; a pale wash over a scene is left alone.
 ```
 restore-photos/SKILL.md      what the agent reads: which script, which flags, the QC loop
 restore-photos/scripts/
-    select_photos.py         CSV -> <out>/<tier>/originals/ + manifest.csv
     restore.py               image(s) or folder -> model pass -> damage mask -> composite, original colours; QC sheets per folder
                              (--fix-color adds the colour fix; --mode color: colour only; --recursive)
     inpaint.py               native-resolution repaint of masked regions on big scans (--hires)
@@ -129,19 +127,12 @@ venv/bin/python restore-photos/scripts/restore.py "~/Scans/Fotos da vovó" --fix
 # faded only: colour fix, no model
 venv/bin/python restore-photos/scripts/restore.py "~/Scans/Fotos da vovó" --mode color
 
-# from a damage-scan CSV: copy per tier, then restore each tier
-venv/bin/python restore-photos/scripts/select_photos.py photos_needing_restoration.csv
-venv/bin/python restore-photos/scripts/restore.py ~/Downloads/photo-restore/Severe/originals
-venv/bin/python restore-photos/scripts/restore.py ~/Downloads/photo-restore/Light/originals --mode color
-
 # fix one mask without a new model call: region 4 was a real hand, region 9 is damage under the threshold
-venv/bin/python restore-photos/scripts/restore.py ".../Severe/originals/x.jpg" --reuse-raw --drop 4 --include 9
+venv/bin/python restore-photos/scripts/restore.py "~/Scans/Fotos da vovó/x.jpg" --reuse-raw --drop 4 --include 9
 
-# broken JPEGs
-venv/bin/python restore-photos/scripts/fix_broken.py ".../Digital/originals/"*.jpg --crop-strip
+# JPEGs with a data-stream error or a truncated tail
+venv/bin/python restore-photos/scripts/fix_broken.py ~/Scans/broken/*.jpg --crop-strip
 ```
-
-The CSV route needs the columns `priority,issues,file,full_path`.
 
 ## License
 

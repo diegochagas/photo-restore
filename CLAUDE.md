@@ -12,11 +12,10 @@ the skill folder. Read `restore-photos/SKILL.md` before running any script.
 - Scripts import each other from their own folder (`restore.py` uses
   `comfy_client.py`, `fix_color.py`, `inpaint.py`), so they run from
   anywhere but must stay in `restore-photos/scripts/`.
-- Input is an image, several images or a folder (`--recursive`), or a CSV
-  through `select_photos.py`. Results always go to
-  `~/Downloads/photo-restore/<folder name>` (loose images: the root; or
-  `$PHOTO_RESTORE_OUT`, `--output`, or the parent of an `originals/`
-  folder); no script writes next to its input or into a photo library. No personal path, host or library location
+- Input is an image, several images or a folder (`--recursive`). Results
+  always go to `~/Downloads/photo-restore/<folder name>` (loose images: the
+  root; `$PHOTO_RESTORE_OUT` or `--output` change it); no script writes
+  next to its input or into a photo library. No personal path, host or library location
   belongs in this repo, not even as a default.
 - The model's pixels are used only inside the damage mask (`restore.py`
   `diff_regions` → `composite`), colour-matched to the scan first, and the
