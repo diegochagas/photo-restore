@@ -112,22 +112,32 @@ without it the restored files lose their date and camera tags.
 
 ### Local AI models
 
-Not installed by this repo. ComfyUI needs, for `--backend klein` (default):
+Not installed by this repo. The reproducible install lives in
+[gimp-setup](https://github.com/diegochagas/gimp-setup) (`features/comfyui.sh`):
+ComfyUI with the ComfyUI-GGUF node, the model files, and a `comfyui`
+**systemd user service** on `127.0.0.1:8188` that is deliberately not
+enabled at boot, because a loaded model holds several GB of GPU memory and
+up to ~23 GB of RAM (Qwen) while it runs. `--backend klein` (default) needs
 `diffusion_models/flux-2-klein-4b-fp8.safetensors`,
-`text_encoders/qwen_3_4b.safetensors`, `vae/flux2-vae.safetensors`; for
-`--backend qwen`: the ComfyUI-GGUF custom node,
-`unet/qwen-image-edit-2511-Q4_K_M.gguf`,
+`text_encoders/qwen_3_4b.safetensors` and `vae/flux2-vae.safetensors`;
+`--backend qwen` needs `unet/qwen-image-edit-2511-Q4_K_M.gguf`,
 `text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors`,
-`vae/qwen_image_vae.safetensors`,
+`vae/qwen_image_vae.safetensors` and
 `loras/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors`.
-`venv/bin/python restore-photos/scripts/comfy_client.py --check` tells which
-backend is ready. With `COMFYUI_SERVICE` set, the scripts start the server
-on demand but never stop it, so after a session it keeps the models in
-memory until you stop it yourself:
+
+ComfyUI has to be **running while the scripts run**. With `COMFYUI_SERVICE`
+set in `~/.config/photo-restore/comfyui.env` the scripts start it on demand,
+but they never stop it, so stop it yourself when you are done:
 
 ```bash
-systemctl --user stop comfyui
+systemctl --user start comfyui     # then open http://127.0.0.1:8188
+systemctl --user stop comfyui      # frees the GPU and the RAM
+systemctl --user status comfyui    # is it running?
 ```
+
+`venv/bin/python restore-photos/scripts/comfy_client.py --check` tells
+which backend has its model files. To use a ComfyUI you already run
+elsewhere, set `COMFYUI_URL` and leave `COMFYUI_SERVICE` empty.
 
 ## Usage
 
