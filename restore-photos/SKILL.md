@@ -21,6 +21,8 @@ photo-restore checkout. All paths below are relative to it.
 | `inpaint.py <image> <mask> <out>` | native-resolution repaint of masked regions (big scans; `restore.py --hires` calls it) |
 | `fix_color.py <image> <out>` | the colour fix alone, with all its knobs |
 | `comfy_client.py --check` | is ComfyUI up, which backend has its models |
+| `compare_server.py [--results DIR] [--originals DIR]...` | the review page for Diego: original \| restored side by side (or a slider), a pick per photo (original / restored / redo) and a note, saved to `<results>/preferences.json` |
+| `crop.py`, `faces.py` | used by `restore.py`: straighten + cut white borders; find faces and keep them the scan's |
 
 ## Arguments
 
@@ -62,6 +64,12 @@ skipped, so a folder run resumes; `--force` redoes.
 | "try another version" | `--seed <other>` (and `--force`) |
 | a light leak / burn (orange band, pale wash) the run left alone | run it in mode full (not `--mode color`); a strong orange band gets repainted, a pale wash over the scene does not — the models read it as light, and a prompt naming it (`--prompt`) did not help; say so |
 | "it's a big scan / keep it sharp" | `--hires` (only matters above ~1.3 MP) |
+| "cut this side, it's too destroyed", "cut the part where he appears" | `--cut top,right,bottom,left` (fractions of the photo, after the automatic crop; look at the scan with a 10 % grid and choose) |
+| "fill the white corner", damage the mask missed | `--add x,y,w,h` (pixel box on the cropped photo) |
+| "too dark", "too grainy" | `--fix-color --contrast 0.6`, `--denoise 5` (film grain; 8+ smooths detail) |
+| "the face is different", "use another picture as reference" | `--ref <crop of the same people from a photo of the same day>` (repeatable; `--backend qwen` takes at most 2 - put several people side by side in one image), usually with `--threshold 15`; roll `--seed` 2-3 times and let Diego pick |
+| "the raw is perfect", a print ruined almost everywhere | `--whole` (the model's picture as the result, no mask; `--reuse-raw --whole` turns an existing raw into the result) |
+| "keep the white border" / "don't straighten" | `--no-crop` |
 | "this file won't open / is corrupted / has a grey strip at the bottom" | `fix_broken.py <files>`; `--crop-strip` for a truncated file with a flat grey strip |
 
 ## Workflow
@@ -111,7 +119,20 @@ never fall back to a paid service.
      `--wb 1` for a real magenta/green cast, `--contrast 0` for harsh grain.
    A single-image re-run rewrites only that photo's files; look at its new
    `compare.jpg` rather than rebuilding the sheets.
-4. **Report:** approved / fixed / flagged (photos you could not get right;
+4. **Diego's review:** set `COMPARE_RESULTS` (the run's output folder) and
+   `COMPARE_ORIGINALS` (the folder(s) with the scans, `:`-separated) in
+   `~/.config/photo-restore/compare.env` for this run - the file lives
+   outside the repo, never put these paths in it - and start
+   `compare_server.py` (http://localhost:8790; in the Claude desktop app via
+   `.claude/launch.json`, elsewhere as a background process). Diego marks
+   every photo original / restored / redo with a note; read
+   `<results>/preferences.json` when he says he is done, re-run the redo ones
+   into `<results>/Round N/` (copy their scans into `Round N/originals/`) and
+   the page shows each new round first, with his last note on the photo.
+   What his notes taught so far: destroyed edges are cut, not invented;
+   small damaged corners are repaired, not cut; every burn must go; any face
+   change shows - use references, never deliver an invented face silently.
+5. **Report:** approved / fixed / flagged (photos you could not get right;
    say what is wrong and which ones had content invented), and where the
    results are. Show Diego the compare sheets of the photos you changed the
    most.
@@ -129,6 +150,16 @@ color`, or `--fix-color` on a repair) is a plain auto-levels + half
 grey-world + light CLAHE, no AI, and runs only when asked. So a restored photo
 is trustworthy as a record: what is new is exactly the red area in
 `regions.jpg`, and you looked at it.
+
+Before the composite, the scan is straightened and its white borders cut
+(`crop.py`), and faces are guarded (`faces.py`: found with OpenCV's Haar
+cascades on the model's output, kept only with enough skin tone): inside a
+face the model may only fill pixels that are clearly lighter in the scan than
+in the repair - flakes of lost emulsion - so eyes, mouth and a mustache stay
+the scan's. Interior regions are Poisson-blended, edge regions colour-shifted
+to the scan around them, face regions pasted as they are. With `--ref` it is
+the other way round: the model knows who the people are, so a repaired face
+is taken whole.
 
 Do not deliver a photo whose face was inside the mask without telling Diego
 that this face was redrawn.

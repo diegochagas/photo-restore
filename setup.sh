@@ -27,5 +27,16 @@ COMFYUI_SERVICE=
 CFG
     echo "Wrote $CONF - fill in COMFYUI_URL (default http://127.0.0.1:8188) and COMFYUI_SERVICE (systemd --user unit) if you have them."
 fi
+CCONF="$HOME/.config/photo-restore/compare.env"
+if [ ! -f "$CCONF" ]; then
+    cat > "$CCONF" <<'CFG'
+# restore-photos review page (restore-photos/scripts/compare_server.py).
+# Set before each review; --results / --originals override them.
+COMPARE_RESULTS=
+COMPARE_ORIGINALS=
+COMPARE_PORT=8790
+CFG
+    echo "Wrote $CCONF - set COMPARE_RESULTS / COMPARE_ORIGINALS before a review."
+fi
 venv/bin/python restore-photos/scripts/comfy_client.py --check 2>/dev/null || true
 echo "Setup complete."

@@ -8,7 +8,13 @@ undamaged pixel, every face, stays the original's. Then the colours are fixed.
                [--recursive] [--output DIR] [--seed N] [--reuse-raw] [--threshold 22]
                [--min-area 300] [--drop 3,5] [--include 2] [--add x,y,w,h]...
                [--fix-color] [--levels 1] [--wb 0.5] [--contrast 1.2] [--sat 1.1]
-               [--hires] [--prompt "..."] [--force]
+               [--hires] [--prompt "..."] [--cut t,r,b,l] [--ref img]... [--whole] [--no-crop] [--no-face-guard] [--force]
+
+Before anything else the scan is straightened and its white borders, torn
+white edges and cut corners are cut away (crop.py; --no-crop keeps them).
+A missing piece at the edge of a print is cut, not invented. An edge that is
+destroyed but not white (burnt, eaten, blotched) is cut by hand with
+--cut top,right,bottom,left (fractions, e.g. --cut 0,0,0.45,0).
 
 --mode full (default): model pass -> damage mask -> composite. The colours
   stay the original's: the model's pixels are colour-matched to the scan
@@ -29,8 +35,15 @@ How the damage mask is made (mode full):
      --include N (a region under the threshold), --add x,y,w,h, --protect
      x,y,w,h (keeps the original inside the box, e.g. a face the model
      shifted), then re-run with --reuse-raw (no new model call).
-  4. composite: model pixels (colour-matched) inside the mask, feathered
-     4 px; original everywhere else, original colours. --hires re-runs the model on native-
+  3b. faces (faces.py, found on the model's output and the scan) keep the
+     original everywhere except their missing - white - pixels, so the model
+     cannot give anyone another face (blue boxes in regions.jpg;
+     --no-face-guard turns it off). With --ref it is the other way round:
+     the model's face is the right person, so a repaired face is taken whole.
+  4. composite: model pixels (colour-matched) inside the mask, region by
+     region - Poisson-blended inside the picture, colour-shifted to the
+     original around them at the photo's edge; original everywhere else,
+     original colours. --hires re-runs the model on native-
      resolution crops of the masked regions for scans above ~1.3 MP.
 
 Results: <out>/restored/<name>.jpg (q95, EXIF copied from the original by
@@ -54,6 +67,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import comfy_client  # noqa: E402
+import crop as cropper  # noqa: E402
+import faces  # noqa: E402
 import fix_color  # noqa: E402
 
 PROMPT = ("This is a scan of an old damaged photo print. The white and brown blotches, flakes, stains, "
@@ -62,6 +77,10 @@ PROMPT = ("This is a scan of an old damaged photo print. The white and brown blo
           "or missing area with what would naturally be there, continuing the surrounding people, clothes, "
           "floor and background seamlessly. Keep everything that is not damaged exactly as it is: same "
           "framing, same colors, same faces. No text.")
+REF_PROMPT = (" The other images show the same people undamaged, photographed the same day. Use them only to "
+              "know who each person is: faces you repair must be those people (same face shape, eyes, nose, "
+              "mustache, hair), but keep the pose, head angle, gaze direction, expression and size of the smile of the "
+              "damaged photo exactly.")
 EXT = (".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp")
 FEATHER = 4
 HIRES_MP = 1.3
@@ -91,8 +110,17 @@ def align(orig, gen):
                              (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 100, 1e-5), None, 5)
     except cv2.error:
         return gen
-    return cv2.warpAffine(gen, warp, (orig.shape[1], orig.shape[0]),
-                          flags=cv2.INTER_LANCZOS4 + cv2.WARP_INVERSE_MAP, borderMode=cv2.BORDER_REPLICATE)
+    size = (orig.shape[1], orig.shape[0])
+    out = cv2.warpAffine(gen, warp, size, flags=cv2.INTER_LANCZOS4 + cv2.WARP_INVERSE_MAP,
+                         borderMode=cv2.BORDER_REPLICATE)
+    # the strip the shift uncovers has no model pixels: replicating the edge
+    # smears it into streaks across whatever is there (a face at the border),
+    # so it gets the scan's own pixels and never enters the damage mask
+    valid = cv2.warpAffine(np.full(orig.shape[:2], 255, np.uint8), warp, size,
+                           flags=cv2.INTER_NEAREST + cv2.WARP_INVERSE_MAP, borderValue=0)
+    valid = cv2.erode(valid, np.ones((5, 5), np.uint8)) > 0
+    out[~valid] = orig[~valid]
+    return out
 
 
 def match_colors(orig, gen):
@@ -140,7 +168,7 @@ def diff_regions(orig, gen_m, threshold, min_area):
     labels = np.where(hard > 0, glabels, 0)
     regions = []
     for i in range(1, n):
-        x, y, w, h, _ = stats[i]
+        x, y, w, h, area = stats[i]
         sel = labels == i
         area = int(sel.sum())
         if area == 0:
@@ -186,17 +214,55 @@ def overlay(bgr, labels, regions, mask, drop, include):
     return out
 
 
-def composite(orig, gen_m, mask):
-    hard = (mask > 0).astype(np.float32)
-    alpha = cv2.GaussianBlur(hard, (0, 0), FEATHER)
-    alpha = np.maximum(alpha, hard)[:, :, None]
-    return np.clip(orig.astype(np.float32) * (1 - alpha) + gen_m.astype(np.float32) * alpha + 0.5, 0, 255).astype(np.uint8)
+def composite(orig, gen_m, mask, ring=12, direct=None):
+    """Model pixels inside the mask, original outside, region by region, so
+    a big fill (a sky, a wall) cannot show as a flat patch of slightly
+    different colour:
+      - a region inside the picture is Poisson-blended (cv2.seamlessClone):
+        its colours follow the original all around it;
+      - a region that reaches into a face (`direct`: the face guard leaves
+        it full of kept holes whose edges are damage) is pasted as is -
+        blending would pull the damage back in;
+      - a region touching the photo's edge (a burnt or eaten border) has no
+        good original on that side - blending would pull the burn back in -
+        so its model pixels are shifted by the mean colour difference on a
+        ring of original just inside it, then pasted with a 4 px feather."""
+    H, W = mask.shape
+    out = orig.copy()
+    n, labels, stats, _ = cv2.connectedComponentsWithStats((mask > 0).astype(np.uint8), connectivity=8)
+    kernel = np.ones((2 * ring + 1,) * 2, np.uint8)
+    for i in range(1, n):
+        x, y, w, h, _ = stats[i]
+        sel = labels == i
+        m = sel.astype(np.uint8) * 255
+        if direct is not None and direct[sel].any():
+            # reaches into a face: the guard left it full of kept holes whose
+            # edges are damage, so blending would pull the damage back in
+            alpha = np.maximum(cv2.GaussianBlur(sel.astype(np.float32), (0, 0), 1.5), sel)[:, :, None]
+            out = np.clip(out * (1 - alpha) + gen_m * alpha + 0.5, 0, 255).astype(np.uint8)
+            continue
+        if x > 1 and y > 1 and x + w < W - 1 and y + h < H - 1:
+            try:
+                out = cv2.seamlessClone(gen_m, out, m, (int(x + w // 2), int(y + h // 2)), cv2.NORMAL_CLONE)
+                continue
+            except cv2.error:
+                pass
+        around = (cv2.dilate(m, kernel) > 0) & ~(mask > 0)
+        src = gen_m.astype(np.float32)
+        if around.sum() > 50:
+            src = src + (orig[around].astype(np.float32).mean(axis=0) - src[around].mean(axis=0))
+        alpha = cv2.GaussianBlur(sel.astype(np.float32), (0, 0), FEATHER)
+        alpha = np.maximum(alpha, sel)[:, :, None]
+        out = np.clip(out * (1 - alpha) + src * alpha + 0.5, 0, 255).astype(np.uint8)
+    return out
 
 
 def compare_sheet(orig, result, path, max_w=900):
     s = min(1.0, max_w / orig.shape[1])
     a = cv2.resize(orig, None, fx=s, fy=s, interpolation=cv2.INTER_AREA) if s < 1 else orig
-    b = cv2.resize(result, None, fx=s, fy=s, interpolation=cv2.INTER_AREA) if s < 1 else result
+    # the result may be cropped / straightened: show it at the scan's height
+    b = cv2.resize(result, (max(1, round(result.shape[1] * a.shape[0] / result.shape[0])), a.shape[0]),
+                   interpolation=cv2.INTER_AREA)
     gap = np.full((a.shape[0], 10, 3), 80, np.uint8)
     cv2.imwrite(path, np.hstack([a, gap, b]), [cv2.IMWRITE_JPEG_QUALITY, 85])
 
@@ -241,7 +307,7 @@ def restore_one(src, a, folder=None):
     os.makedirs(work, exist_ok=True)
     name = os.path.splitext(os.path.basename(src))[0]
     dst = os.path.join(rest_dir, name + ".jpg")
-    if os.path.exists(dst) and not (a.force or a.reuse_raw or a.raw or a.drop or a.include or a.add or a.protect):
+    if os.path.exists(dst) and not (a.force or a.reuse_raw or a.raw or a.drop or a.include or a.add or a.protect or a.whole):
         print(f"skip (exists): {dst}")
         return
     orig = cv2.imread(src, cv2.IMREAD_COLOR)
@@ -249,10 +315,20 @@ def restore_one(src, a, folder=None):
         print(f"cannot read {src}", file=sys.stderr)
         return
     t0 = time.time()
+    scan = orig
+    if not a.no_crop:
+        orig, info = cropper.crop(orig)
+        if info["changed"]:
+            print(f"   crop: angle {info['angle']}°, kept {orig.shape[1]}x{orig.shape[0]} of {scan.shape[1]}x{scan.shape[0]}")
+    if a.cut:
+        t, r, b, l = (float(v) for v in a.cut.split(","))
+        H, W = orig.shape[:2]
+        orig = orig[round(H * t):H - round(H * b), round(W * l):W - round(W * r)]
+        print(f"   cut: kept {orig.shape[1]}x{orig.shape[0]}")
     if a.mode == "color":
         result = fix_color.fix(orig, None, a.levels, a.wb, a.contrast, a.sat)
         save_jpeg(dst, result, src)
-        compare_sheet(orig, result, os.path.join(work, name + ".compare.jpg"))
+        compare_sheet(scan, result, os.path.join(work, name + ".compare.jpg"))
         print(f"-> {dst} (colour only, {time.time() - t0:.0f}s)")
         return
     raw_path = os.path.join(work, name + ".raw.png")
@@ -268,23 +344,53 @@ def restore_one(src, a, folder=None):
     else:
         if not comfy_client.available(a.backend):
             sys.exit(f"{a.backend} is not available in ComfyUI - start it or fix the model files (see README)")
-        raw = comfy_client.edit(orig, a.prompt or PROMPT, a.backend, a.seed)
+        refs = [cv2.imread(os.path.expanduser(r)) for r in (a.ref or [])]
+        if any(r is None for r in refs):
+            sys.exit("--ref: cannot read one of the reference images")
+        prompt = (a.prompt or PROMPT) + (REF_PROMPT if refs else "")
+        raw = comfy_client.edit(orig, prompt, a.backend, a.seed, refs=refs)
         cv2.imwrite(raw_path, raw)
+    if a.whole:
+        # the model's picture as it is (typically with --ref: the whole scene
+        # redrawn consistently beats pasting pieces of it into a ruined scan)
+        result = raw
+        if a.fix_color:
+            result = fix_color.fix(result, None, a.levels, a.wb, a.contrast, a.sat)
+        if a.denoise:
+            result = cv2.fastNlMeansDenoisingColored(result, None, a.denoise, a.denoise, 7, 21)
+        save_jpeg(dst, result, src)
+        compare_sheet(scan, result, os.path.join(work, name + ".compare.jpg"))
+        print(f"-> {dst}  whole model picture, {time.time() - t0:.0f}s")
+        return
     gen = match_colors(orig, align(orig, raw))
     labels, regions, _ = diff_regions(orig, gen, a.threshold, a.min_area)
     drop, inc, add = parse_nums(a.drop), parse_nums(a.include), parse_boxes(a.add)
     mask = build_mask(orig.shape[:2], labels, regions, drop, inc, add, protect=parse_boxes(a.protect))
+    face_boxes = [] if a.no_face_guard else faces.find(orig, gen)
+    face_area = faces.area(orig.shape[:2], face_boxes)
+    if a.ref:
+        # the model's faces are the right people (references): a face the
+        # model repaired is taken whole, so no trace of the damaged one shows
+        touched = [b for b in face_boxes if (mask[b[1]:b[1] + b[3], b[0]:b[0] + b[2]] > 0).mean() > 0.1]
+        face_area = faces.area(orig.shape[:2], touched)
+        mask = np.where(face_area, 255, mask).astype(np.uint8)
+    else:
+        mask = faces.guard(mask, orig, face_boxes, gen)
     cv2.imwrite(os.path.join(work, name + ".mask.png"), mask)
-    cv2.imwrite(os.path.join(work, name + ".regions.jpg"), overlay(orig, labels, regions, mask, drop, inc),
-                [cv2.IMWRITE_JPEG_QUALITY, 85])
+    ov = overlay(orig, labels, regions, mask, drop, inc)
+    for (x, y, w, h) in face_boxes:
+        cv2.rectangle(ov, (x, y), (x + w, y + h), (255, 128, 0), 2)
+    cv2.imwrite(os.path.join(work, name + ".regions.jpg"), ov, [cv2.IMWRITE_JPEG_QUALITY, 85])
     if a.hires and orig.shape[0] * orig.shape[1] > HIRES_MP * 1e6 and mask.any():
         import inpaint
         gen = inpaint.inpaint(orig, mask, PROMPT, a.backend, a.seed, base=gen)
-    result = composite(orig, gen, mask)
+    result = composite(orig, gen, mask, direct=face_area)
     if a.fix_color:
         result = fix_color.fix(result, None, a.levels, a.wb, a.contrast, a.sat)
+    if a.denoise:
+        result = cv2.fastNlMeansDenoisingColored(result, None, a.denoise, a.denoise, 7, 21)
     save_jpeg(dst, result, src)
-    compare_sheet(orig, result, os.path.join(work, name + ".compare.jpg"))
+    compare_sheet(scan, result, os.path.join(work, name + ".compare.jpg"))
     on = [r["n"] for r in regions if (r["accepted"] and r["n"] not in drop) or r["n"] in inc]
     print(f"-> {dst}  regions {len(on)} in / {len(regions) - len(on)} out, mask {(mask > 0).mean() * 100:.1f}% "
           f"of the image, {time.time() - t0:.0f}s")
@@ -314,13 +420,26 @@ def main():
     ap.add_argument("--wb", type=float, default=0.5)
     ap.add_argument("--contrast", type=float, default=1.2)
     ap.add_argument("--sat", type=float, default=1.1)
+    ap.add_argument("--cut", help="top,right,bottom,left fractions to cut away (a destroyed edge that should "
+                    "not be rebuilt), after the automatic crop (single image)")
+    ap.add_argument("--no-face-guard", action="store_true",
+                    help="let the model repaint faces too (default: only their missing pixels)")
+    ap.add_argument("--ref", action="append",
+                    help="image of the same people undamaged (a crop of a better photo from the same day); "
+                    "the model uses it as an identity reference (klein, repeatable, single image)")
+    ap.add_argument("--whole", action="store_true",
+                    help="use the model's whole picture as the result, no damage mask (a print ruined "
+                    "almost everywhere, usually with --ref)")
+    ap.add_argument("--no-crop", action="store_true", help="keep the scan's white borders and angle")
+    ap.add_argument("--denoise", type=float, default=0,
+                    help="film-grain reduction strength (0 off, 3-6 mild, 8+ strong; smooths detail too)")
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
     files = collect(a.paths, a.recursive)
     if not files:
         sys.exit("nothing to do")
-    if len(files) > 1 and (a.raw or a.drop or a.include or a.add or a.protect or a.prompt):
-        sys.exit("--raw/--drop/--include/--add/--protect/--prompt apply to one image at a time")
+    if len(files) > 1 and (a.raw or a.drop or a.include or a.add or a.protect or a.prompt or a.cut or a.ref):
+        sys.exit("--raw/--drop/--include/--add/--protect/--prompt/--cut/--ref apply to one image at a time")
     roots = {}
     for f, folder in files:
         restore_one(f, a, folder)

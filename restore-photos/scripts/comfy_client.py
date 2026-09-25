@@ -127,9 +127,11 @@ def upload(bgr):
     return f"{res['subfolder']}/{res['name']}" if res.get("subfolder") else res["name"]
 
 
-def workflow_qwen(image_name, w, h, prompt, seed):
+def workflow_qwen(image_name, w, h, prompt, seed, refs=(), strength=1.0):
+    """refs: up to two uploaded reference image names, fed to the edit
+    encoder as image2 / image3 (Qwen-Image-Edit-2511 multi-image input)."""
     m = QWEN
-    return {
+    wf = {
         "1": {"class_type": "UnetLoaderGGUF", "inputs": {"unet_name": m["unet"]}},
         "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": m["clip"], "type": "qwen_image", "device": "default"}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": m["vae"]}},
@@ -146,15 +148,27 @@ def workflow_qwen(image_name, w, h, prompt, seed):
         "13": {"class_type": "VAEEncode", "inputs": {"pixels": ["8", 0], "vae": ["3", 0]}},
         "14": {"class_type": "KSampler", "inputs": {"model": ["6", 0], "positive": ["11", 0], "negative": ["12", 0],
                                                     "latent_image": ["13", 0], "seed": seed, "steps": 4, "cfg": 1.0,
-                                                    "sampler_name": "euler", "scheduler": "simple", "denoise": 1.0}},
+                                                    "sampler_name": "euler", "scheduler": "simple", "denoise": strength}},
         "15": {"class_type": "VAEDecode", "inputs": {"samples": ["14", 0], "vae": ["3", 0]}},
         "16": {"class_type": "PreviewImage", "inputs": {"images": ["15", 0]}},
     }
+    for k, name in enumerate(refs[:2]):
+        i = 100 + 10 * k
+        wf[str(i)] = {"class_type": "LoadImage", "inputs": {"image": name}}
+        wf[str(i + 1)] = {"class_type": "ImageScaleToTotalPixels",
+                          "inputs": {"image": [str(i), 0], "upscale_method": "lanczos", "megapixels": 0.5,
+                                     "resolution_steps": 16}}
+        for node in ("9", "10"):
+            wf[node]["inputs"][f"image{k + 2}"] = [str(i + 1), 0]
+    return wf
 
 
-def workflow_klein(image_name, w, h, prompt, seed):
+def workflow_klein(image_name, w, h, prompt, seed, refs=()):
+    """refs: uploaded reference image names (same people, undamaged). Each is
+    VAE-encoded and chained as one more ReferenceLatent after the photo, the
+    FLUX.2 multi-reference layout."""
     m = KLEIN
-    return {
+    wf = {
         "1": {"class_type": "UNETLoader", "inputs": {"unet_name": m["unet"], "weight_dtype": "default"}},
         "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": m["clip"], "type": "flux2", "device": "default"}},
         "3": {"class_type": "VAELoader", "inputs": {"vae_name": m["vae"]}},
@@ -176,16 +190,34 @@ def workflow_klein(image_name, w, h, prompt, seed):
         "15": {"class_type": "VAEDecode", "inputs": {"samples": ["14", 0], "vae": ["3", 0]}},
         "16": {"class_type": "PreviewImage", "inputs": {"images": ["15", 0]}},
     }
+    pos, neg = "11", "12"
+    for k, name in enumerate(refs):
+        i = 100 + 10 * k
+        wf[str(i)] = {"class_type": "LoadImage", "inputs": {"image": name}}
+        wf[str(i + 1)] = {"class_type": "ImageScaleToTotalPixels",
+                          "inputs": {"image": [str(i), 0], "upscale_method": "lanczos", "megapixels": 0.5,
+                                     "resolution_steps": 16}}
+        wf[str(i + 2)] = {"class_type": "VAEEncode", "inputs": {"pixels": [str(i + 1), 0], "vae": ["3", 0]}}
+        wf[str(i + 3)] = {"class_type": "ReferenceLatent", "inputs": {"conditioning": [pos, 0], "latent": [str(i + 2), 0]}}
+        wf[str(i + 4)] = {"class_type": "ReferenceLatent", "inputs": {"conditioning": [neg, 0], "latent": [str(i + 2), 0]}}
+        pos, neg = str(i + 3), str(i + 4)
+    wf["17"]["inputs"].update(positive=[pos, 0], negative=[neg, 0])
+    return wf
 
 
-def edit(bgr, prompt, backend="qwen", seed=42, model_mp=1.0):
+def edit(bgr, prompt, backend="qwen", seed=42, model_mp=1.0, refs=(), strength=1.0):
     """Run one image-edit call. Returns BGR at the input's size (the model
-    works at ~model_mp megapixels, sides multiple of 16)."""
+    works at ~model_mp megapixels, sides multiple of 16). refs: BGR images of
+    the same people undamaged, used as identity references (qwen: at most 2).
+    strength (qwen): below 1 the model starts from the photo itself and only
+    partly repaints it, so pose, gaze and expression stay the photo's."""
     h0, w0 = bgr.shape[:2]
     s = min(1.0, (model_mp * 1e6 / (w0 * h0)) ** 0.5) if model_mp else 1.0
     w, h = max(16, round(w0 * s / 16) * 16), max(16, round(h0 * s / 16) * 16)
     name = upload(bgr)
-    wf = (workflow_qwen if backend == "qwen" else workflow_klein)(name, w, h, prompt, seed)
+    ref_names = [upload(r) for r in refs]
+    wf = (workflow_klein(name, w, h, prompt, seed, ref_names) if backend == "klein"
+          else workflow_qwen(name, w, h, prompt, seed, ref_names, strength))
     req = urllib.request.Request(URL + "/prompt", json.dumps({"prompt": wf}).encode(),
                                  {"Content-Type": "application/json"})
     try:
