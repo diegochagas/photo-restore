@@ -104,7 +104,8 @@ def available(backend="qwen"):
             ok, why = not missing, f"model files missing: {', '.join(missing)}"
             break
         except (urllib.error.URLError, OSError, ValueError, KeyError):
-            why = f"ComfyUI not reachable at {URL}"
+            why = (f"ComfyUI not reachable at {URL}; start it with: "
+                   f"systemctl --user start {SERVICE or 'comfyui'}")
             if attempt or not _start_service():
                 break
     if not ok:

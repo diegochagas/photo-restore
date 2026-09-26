@@ -349,7 +349,9 @@ def restore_one(src, a, folder=None):
             sys.exit(f"--reuse-raw: no raw at {raw_path}")
     else:
         if not comfy_client.available(a.backend):
-            sys.exit(f"{a.backend} is not available in ComfyUI - start it or fix the model files (see README)")
+            sys.exit(f"{a.backend} is not available in ComfyUI (reason above). Start it with:\n\n"
+                     f"    systemctl --user start {comfy_client.SERVICE or 'comfyui'}\n\n"
+                     "wait ~20 s and run again, or fix the model files (see README)")
         refs = [cv2.imread(os.path.expanduser(r)) for r in (a.ref or [])]
         if any(r is None for r in refs):
             sys.exit("--ref: cannot read one of the reference images")
