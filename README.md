@@ -82,6 +82,7 @@ restore-photos/scripts/
     inpaint.py               native-resolution repaint of masked regions on big scans (--hires)
     crop.py                  straighten a crooked scan, cut its white borders
     faces.py                 find faces (OpenCV Haar, no download) and keep them the scan's
+    higgsfield_restore.py    optional online restore with Higgsfield (paid), shown as a third option on the review page
     compare_server.py        review page: original | restored, a pick + note per photo -> preferences.json
     compare.html             its page
     fix_color.py             the colour fix alone (auto levels, grey world, CLAHE, saturation)

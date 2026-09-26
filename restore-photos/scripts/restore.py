@@ -8,7 +8,7 @@ undamaged pixel, every face, stays the original's. Then the colours are fixed.
                [--recursive] [--output DIR] [--seed N] [--reuse-raw] [--threshold 22]
                [--min-area 300] [--drop 3,5] [--include 2] [--add x,y,w,h]...
                [--fix-color] [--levels 1] [--wb 0.5] [--contrast 1.2] [--sat 1.1]
-               [--hires] [--prompt "..."] [--cut t,r,b,l] [--ref img]... [--whole] [--no-crop] [--no-face-guard] [--force]
+               [--hires] [--prompt "..."] [--cut t,r,b,l] [--ref img]... [--whole] [--burns] [--no-crop] [--no-face-guard] [--force]
 
 Before anything else the scan is straightened and its white borders, torn
 white edges and cut corners are cut away (crop.py; --no-crop keeps them).
@@ -77,6 +77,12 @@ PROMPT = ("This is a scan of an old damaged photo print. The white and brown blo
           "or missing area with what would naturally be there, continuing the surrounding people, clothes, "
           "floor and background seamlessly. Keep everything that is not damaged exactly as it is: same "
           "framing, same colors, same faces. No text.")
+BURN_PROMPT = ("This is a scan of an old damaged photo print. It is covered with chemical damage: shiny gold, "
+               "orange and brown metallic flakes and specks, burn stains, rusty blotches, white spots and mottled "
+               "discoloured patches. None of that is part of the picture. Remove ALL of it and show the clean "
+               "photo underneath: walls, floor, sky, clothes and background must be smooth and even where the "
+               "damage was. Keep every person, face, expression, object and the framing exactly as they are. "
+               "No text.")
 REF_PROMPT = (" The other images show the same people undamaged, photographed the same day. Use them only to "
               "know who each person is: faces you repair must be those people (same face shape, eyes, nose, "
               "mustache, hair), but keep the pose, head angle, gaze direction, expression and size of the smile of the "
@@ -347,7 +353,7 @@ def restore_one(src, a, folder=None):
         refs = [cv2.imread(os.path.expanduser(r)) for r in (a.ref or [])]
         if any(r is None for r in refs):
             sys.exit("--ref: cannot read one of the reference images")
-        prompt = (a.prompt or PROMPT) + (REF_PROMPT if refs else "")
+        prompt = (a.prompt or (BURN_PROMPT if a.burns else PROMPT)) + (REF_PROMPT if refs else "")
         raw = comfy_client.edit(orig, prompt, a.backend, a.seed, refs=refs)
         cv2.imwrite(raw_path, raw)
     if a.whole:
@@ -430,11 +436,16 @@ def main():
     ap.add_argument("--whole", action="store_true",
                     help="use the model's whole picture as the result, no damage mask (a print ruined "
                     "almost everywhere, usually with --ref)")
+    ap.add_argument("--burns", action="store_true",
+                    help="chemical burns / gold flakes / rusty blotches: Qwen with a burn-removal prompt "
+                    "(~110 s per photo; faces stay guarded)")
     ap.add_argument("--no-crop", action="store_true", help="keep the scan's white borders and angle")
     ap.add_argument("--denoise", type=float, default=0,
                     help="film-grain reduction strength (0 off, 3-6 mild, 8+ strong; smooths detail too)")
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
+    if a.burns and a.backend == "klein" and "--backend" not in sys.argv:
+        a.backend = "qwen"
     files = collect(a.paths, a.recursive)
     if not files:
         sys.exit("nothing to do")

@@ -35,6 +35,7 @@ if [ ! -f "$CCONF" ]; then
 COMPARE_RESULTS=
 COMPARE_ORIGINALS=
 COMPARE_PORT=8790
+COMPARE_ALT=Higgsfield,Higgsfield 2
 CFG
     echo "Wrote $CCONF - set COMPARE_RESULTS / COMPARE_ORIGINALS before a review."
 fi

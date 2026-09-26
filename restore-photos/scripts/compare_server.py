@@ -13,6 +13,9 @@ Settings (arguments win, else ~/.config/photo-restore/compare.env):
                      without extension); may be left empty when every
                      results folder has an originals/ copy
   COMPARE_PORT       default 8790
+  COMPARE_ALT        results sets shown as an extra option next to every
+                     photo instead of as sets of their own (comma-separated
+                     sub-folder names, default "Higgsfield,Higgsfield 2")
 
 A results folder is one set when it holds restored/ itself, and one set per
 sub-folder that holds restored/ (tiers, re-run rounds "Round N" - newest
@@ -60,9 +63,10 @@ def images(folder, recursive=False):
 
 
 class Library:
-    def __init__(self, results, originals):
+    def __init__(self, results, originals, alt=("Higgsfield",)):
         self.results = results
         self.originals = originals
+        self.alt = set(alt)
         self.prefs_path = results / "preferences.json"
         self.files = {}          # url id -> real path, the only files served
 
@@ -71,9 +75,19 @@ class Library:
         if (self.results / "restored").is_dir():
             found.append((self.results.name, self.results))
         for d in self.results.iterdir():
-            if d.is_dir() and (d / "restored").is_dir():
+            if d.is_dir() and (d / "restored").is_dir() and d.name not in self.alt:
                 found.append((d.name, d))
         return sorted(found, key=lambda s: round_key(s[0]))
+
+    def alternatives(self):
+        """{stem: [(label, path)]} from the COMPARE_ALT sets."""
+        out = {}
+        for name in sorted(self.alt):
+            d = self.results / name / "restored"
+            if d.is_dir():
+                for p in images(d):
+                    out.setdefault(p.stem, []).append((name, p))
+        return out
 
     def load_prefs(self):
         try:
@@ -98,35 +112,40 @@ class Library:
         return info
 
     def photos(self):
+        """One entry per photo (keyed by the scan's file name): its original,
+        every restored version it has (newest set first) and the
+        alternatives (Higgsfield...)."""
         shared = {}
         for folder in self.originals:
             for p in images(folder, recursive=True):
                 shared.setdefault(p.stem, p)
-        info, prefs = self.manifest(), self.load_prefs()
+        info = self.manifest()
         self.files = {}
-        out = []
+        groups = {}
         sets = self.sets()
-        rank = {name: i for i, (name, _) in enumerate(sets)}   # newest first
+        alts = self.alternatives()
         for name, d in sets:
             own = {p.stem: p for p in images(d / "originals")} if (d / "originals").is_dir() else {}
             for r in sorted(images(d / "restored"), key=lambda p: p.name):
                 o = own.get(r.stem) or shared.get(r.stem)
                 if not o:
                     continue
-                pid = f"{name}/{o.name}"
-                k = len(self.files)
-                self.files[f"o{k}"], self.files[f"r{k}"] = o, r
-                line = info.get((name, o.name)) or info.get(("", r.stem), "")
-                # your latest note on the same photo in an older set (an earlier round)
-                older = [(v.get("at", ""), key.split("/", 1)[0], v["note"]) for key, v in prefs.items()
-                         if key.split("/", 1)[-1] == o.name and v.get("note")
-                         and rank.get(key.split("/", 1)[0], -1) > rank[name]]
-                if older:
-                    _, where, note = max(older)
-                    line = (line + " — " if line else "") + f"your note ({where}): {note}"
-                out.append({"id": pid, "tier": name, "name": r.stem, "issues": line,
-                            "original": f"img/o{k}", "restored": f"img/r{k}"})
-        return out
+                g = groups.get(o.name)
+                if g is None:
+                    k = len(self.files)
+                    self.files[f"o{k}"] = o
+                    alt = []
+                    # "<name>.<ext>.jpg" (same name, other extension exists) wins over "<name>.jpg"
+                    for j, (label, path) in enumerate(alts.get(o.name) or alts.get(r.stem, [])):
+                        self.files[f"a{k}_{j}"] = path
+                        alt.append({"label": label, "url": f"img/a{k}_{j}"})
+                    g = groups[o.name] = {"id": o.name, "name": o.stem, "issues": "", "original": f"img/o{k}",
+                                          "versions": [], "alt": alt}
+                v = len(self.files)
+                self.files[f"r{v}"] = r
+                g["versions"].append({"set": name, "url": f"img/r{v}"})
+                g["issues"] = g["issues"] or info.get((name, o.name)) or info.get(("", r.stem), "")
+        return sorted(groups.values(), key=lambda g: g["name"])
 
 
 def make_handler(lib):
@@ -201,7 +220,8 @@ def main():
     missing = [str(p) for p in originals if not p.is_dir()]
     if missing:
         sys.exit(f"originals folder not found: {', '.join(missing)}")
-    lib = Library(results, originals)
+    alt = [x.strip() for x in cfg.get("COMPARE_ALT", "Higgsfield,Higgsfield 2").split(",") if x.strip()]
+    lib = Library(results, originals, alt)
     if not lib.sets():
         sys.exit(f"nothing to compare: no restored/ folder in {results} or its sub-folders")
     n = len(lib.photos())

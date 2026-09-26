@@ -22,6 +22,7 @@ photo-restore checkout. All paths below are relative to it.
 | `fix_color.py <image> <out>` | the colour fix alone, with all its knobs |
 | `comfy_client.py --check` | is ComfyUI up, which backend has its models |
 | `compare_server.py [--results DIR] [--originals DIR]...` | the review page for Diego: original \| restored side by side (or a slider), a pick per photo (original / restored / redo) and a note, saved to `<results>/preferences.json` |
+| `higgsfield_restore.py <image-or-folder>... --output <results>/Higgsfield` | the same scans restored online by Higgsfield (Nano Banana Pro, 2 credits/photo at 2k, `--cost` estimates) - **paid and uploads the photos: only when Diego asks for it**. The whole picture is the model's (faces can change); the review page shows it as a third option next to every photo |
 | `crop.py`, `faces.py` | used by `restore.py`: straighten + cut white borders; find faces and keep them the scan's |
 
 ## Arguments
@@ -129,6 +130,18 @@ never fall back to a paid service.
    `<results>/preferences.json` when he says he is done, re-run the redo ones
    into `<results>/Round N/` (copy their scans into `Round N/originals/`) and
    the page shows each new round first, with his last note on the photo.
+   Higgsfield second pass on photos Diego still rejects: `--strict` (repair
+   only, faces kept), `--ref` with **face crops only** (a whole same-day
+   photo as reference makes Nano Banana Pro return that photo instead of
+   the repair), `--resolution 4k` (4 credits) when he says blurry,
+   `--angle` / `--cut` / `--extra "..."` for tilted scans, destroyed edges
+   and specific fixes; output to `<results>/Higgsfield 2`. Photos of
+   children in swimwear or bath are refused by Higgsfield's NSFW filter -
+   do not try to get around it, they stay local-only.
+   `Higgsfield/` and `Higgsfield 2/` results sub-folders (COMPARE_ALT) are
+   not sets of their own: the page shows each as an extra pane with its own
+   pick (keys 4, 5) next to every photo with the same name; the "Slider: original | alternative"
+   mode compares it directly.
    What his notes taught so far: destroyed edges are cut, not invented;
    small damaged corners are repaired, not cut; every burn must go; any face
    change shows - use references, never deliver an invented face silently.
