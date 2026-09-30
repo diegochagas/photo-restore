@@ -1,9 +1,13 @@
 # photo-restore
 
-One skill, `restore-photos/` (`SKILL.md` + `scripts/`), harness-neutral: this
+Two skills, `restore-photos/` and `modernize-photos/` (each `SKILL.md` +
+`scripts/`), harness-neutral: this
 file is read as `CLAUDE.md` (Claude Code) and, through a symlink, as
 `AGENTS.md` (Codex). `.claude/skills/` and `.agents/skills/` hold symlinks to
-the skill folder. Read `restore-photos/SKILL.md` before running any script.
+the skill folders. Read the skill's `SKILL.md` before running any of its
+scripts. `modernize-photos/scripts/modernize.py` imports from
+`restore-photos/scripts/` (crop, Higgsfield helpers, ComfyUI client, sheets),
+so the two folders stay side by side.
 
 - `setup.sh` creates `venv/` (opencv-python-headless, numpy, pillow) and
   writes an empty `~/.config/photo-restore/comfyui.env` (COMFYUI_URL,
@@ -22,3 +26,7 @@ the skill folder. Read `restore-photos/SKILL.md` before running any script.
   colour fix is opt-in (`--fix-color`, `--mode color`). Keep that contract
   when changing anything: a restored photo must be the original, in the
   original's colours, everywhere it was not damaged.
+- `modernize-photos` is the opposite on purpose: the whole picture is the
+  model's (modern iPhone look), Higgsfield first, local ComfyUI when it is
+  not logged in / out of credits / refuses a photo. Results in
+  `~/Downloads/photo-modernize/<folder name>` (`$PHOTO_MODERNIZE_OUT`).

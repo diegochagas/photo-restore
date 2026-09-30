@@ -68,6 +68,7 @@ read as damage; a pale wash over a scene is left alone.
 | Skill | Scripts | What it does |
 | --- | --- | --- |
 | [`restore-photos`](restore-photos/) | `restore.py`, `crop.py`, `faces.py`, `compare_server.py`, `inpaint.py`, `fix_color.py`, `fix_broken.py`, `contact_sheet.py`, `comfy_client.py`, `examples/` | `/restore-photos <image-or-folder>`: repairs scanned prints — water and emulsion damage, stains, scratches, creases, cut corners — with a local image-edit model (FLUX.2 klein by default, Qwen-Image-Edit with `--backend qwen`, both in ComfyUI, free, offline) and takes the model's pixels **only inside the damage mask**: the output is aligned and colour-matched to the scan, the areas where it still differs are the damage it repaired, and every other pixel, every face, stays the scan's own, in the scan's own colours. `--fix-color` adds an automatic colour fix after the repair; `--mode color` runs that fix alone on faded or colour-cast prints (no model, ~1 s/photo). A folder (`--recursive` for sub-folders) ends with QC contact sheets; the agent reviews every one and fixes a mask for free with `--reuse-raw` plus `--drop N` / `--include N` / `--add x,y,w,h` / `--protect x,y,w,h`, or rerolls with `--seed`. Scans are straightened and their white borders cut first (`--cut` for destroyed edges, `--no-crop` to keep them), faces keep the scan's features (`--ref` gives the model a clean photo of the same people instead, `--whole` takes its picture as the result). `fix_broken.py` re-saves JPEGs with a data-stream error or a truncated tail (`--crop-strip` removes the grey strip), EXIF kept. `compare_server.py` is the review page: original and result side by side, a pick and a note per photo, saved next to the results. Results in `~/Downloads/photo-restore/<folder name>/`, sources never touched. |
+| [`modernize-photos`](modernize-photos/) | `modernize.py` (reuses `restore-photos/scripts/`) | `/modernize-photos <image-or-folder>`: makes an old photo look as if it had been taken today with a modern iPhone — sharp, clean, HDR, true-to-life colours, no grain, fading or damage; black-and-white comes back in colour (`--keep-bw` keeps it). Same people, moment and framing, but the whole picture is the model's, so every result is reviewed. Uses Higgsfield (Nano Banana Pro, paid, 2 credits/photo) when its CLI is logged in and has credits, else a local ComfyUI model (FLUX.2 klein / Qwen-Image-Edit, free); photos Higgsfield refuses are done locally. `--cost` estimates first. Results in `~/Downloads/photo-modernize/<folder name>/`. |
 
 The `SKILL.md` documents the flags and a table of "what the user says →
 which flags to pass".
@@ -83,12 +84,17 @@ restore-photos/scripts/
     crop.py                  straighten a crooked scan, cut its white borders
     faces.py                 find faces (OpenCV Haar, no download) and keep them the scan's
     higgsfield_restore.py    optional online restore with Higgsfield (paid), shown as a third option on the review page
+    finalize.py              chosen versions + the originals' metadata + title/people/place from the file name
+    immich_replace.py        put them back into Immich via its API (albums kept, originals to trash)
     compare_server.py        review page: original | restored, a pick + note per photo -> preferences.json
     compare.html             its page
     fix_color.py             the colour fix alone (auto levels, grey world, CLAHE, saturation)
     fix_broken.py            re-save JPEGs with stream errors / truncated tails, EXIF kept
     contact_sheet.py         before/after sheets for batch QC
     comfy_client.py          ComfyUI HTTP client, klein + qwen workflows, --check
+modernize-photos/SKILL.md    the "modern iPhone look" skill
+modernize-photos/scripts/
+    modernize.py             image(s) or folder -> Higgsfield or local model -> modern photo; QC sheets per folder
 setup.sh                     venv + config template
 ```
 
@@ -163,6 +169,11 @@ venv/bin/python restore-photos/scripts/restore.py "~/Scans/Fotos da vovó/x.jpg"
 # review the results in the browser (paths in ~/.config/photo-restore/compare.env,
 # or on the command line): pick original / restored / redo and leave a note per photo
 venv/bin/python restore-photos/scripts/compare_server.py --results "<output folder>" --originals "<scans folder>"
+
+# an old photo as if shot today on an iPhone (Higgsfield if logged in, else local klein)
+venv/bin/python modernize-photos/scripts/modernize.py "~/Scans/Fotos da vovó" --cost
+venv/bin/python modernize-photos/scripts/modernize.py "~/Scans/Fotos da vovó"
+#   -> ~/Downloads/photo-modernize/Fotos da vovó/{modernized,work,sheets}/
 
 # JPEGs with a data-stream error or a truncated tail
 venv/bin/python restore-photos/scripts/fix_broken.py ~/Scans/broken/*.jpg --crop-strip
