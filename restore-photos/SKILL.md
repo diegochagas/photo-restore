@@ -23,6 +23,8 @@ photo-restore checkout. All paths below are relative to it.
 | `comfy_client.py --check` | is ComfyUI up, which backend has its models |
 | `compare_server.py [--results DIR] [--originals DIR]...` | the review page for Diego: original \| restored side by side (or a slider), a pick per photo (original / restored / redo) and a note, saved to `<results>/preferences.json` |
 | `higgsfield_restore.py <image-or-folder>... --output <results>/Higgsfield` | the same scans restored online by Higgsfield (Nano Banana Pro, 2 credits/photo at 2k, `--cost` estimates) - **paid and uploads the photos: only when Diego asks for it**. The whole picture is the model's (faces can change); the review page shows it as a third option next to every photo |
+| `finalize.py <list.json> --output DIR` | the chosen versions with the originals' metadata (all tags + Immich sidecar, UTC offset) plus what the file names say: title/description, people and places from `~/.config/photo-restore/names.json` (outside the repo), "Restaurada" tag |
+| `immich_replace.py <DIR> [--dry-run] [--only NAME]` | puts them back in Immich **through its API**: upload, same albums/favourite/rating, original to Immich's trash (30 days), log for resume/undo; `~/.config/photo-restore/immich.env` holds URL + API key. Always `--dry-run`, then one photo, then the rest |
 | `crop.py`, `faces.py` | used by `restore.py`: straighten + cut white borders; find faces and keep them the scan's |
 
 ## Arguments
@@ -145,7 +147,15 @@ never fall back to a paid service.
    What his notes taught so far: destroyed edges are cut, not invented;
    small damaged corners are repaired, not cut; every burn must go; any face
    change shows - use references, never deliver an invented face silently.
-5. **Report:** approved / fixed / flagged (photos you could not get right;
+5. **Back to the library** (only when Diego asks): build the list of his
+   final picks (`restored:<set>` / `alt` / `alt:<label>` in
+   preferences.json), `finalize.py`, `immich_replace.py --dry-run`, one
+   photo, check it in Immich (date/timezone, album, trash), then the rest.
+   Immich names the new file "<name>+1.jpg" while the original sits in the
+   trash. A date the original has only in Immich (edited there) is copied
+   with `PUT /api/assets {dateTimeOriginal}`. Then set `"done": true` on
+   those picks (stop the page server first) - the page hides them.
+6. **Report:** approved / fixed / flagged (photos you could not get right;
    say what is wrong and which ones had content invented), and where the
    results are. Show Diego the compare sheets of the photos you changed the
    most.

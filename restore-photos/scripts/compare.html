@@ -82,7 +82,9 @@
   <div class="filters">
     <select id="tier"><option value="">All sets</option></select>
     <select id="state">
-      <option value="">All photos</option>
+      <option value="">Still to review</option>
+      <option value="all">All photos, finished included</option>
+      <option value="done">Finished (back in the library)</option>
       <option value="none">Not picked yet</option>
       <option value="restored">Picked restored</option>
       <option value="original">Picked original</option>
@@ -139,7 +141,9 @@ function applyFilters() {
   const t = $('tier').value, s = $('state').value;
   const keep = shown[cur]?.id;
   const kind = p => (prefs[p.id]?.pick || '').split(':')[0];
-  shown = photos.filter(p => (!t || p.versions.some(v => v.set === t)) && (!s || (s === 'none' ? !kind(p) : kind(p) === s)));
+  const done = p => !!prefs[p.id]?.done;
+  shown = photos.filter(p => (!t || p.versions.some(v => v.set === t)) &&
+    (s === 'all' ? true : s === 'done' ? done(p) : !done(p) && (!s || (s === 'none' ? !kind(p) : kind(p) === s))));
   const i = shown.findIndex(p => p.id === keep);
   cur = i >= 0 ? i : 0;
   renderList(); render();
@@ -149,9 +153,10 @@ function renderList() {
   $('list').innerHTML = shown.map((p, i) =>
     `<li data-i="${i}" class="${i === cur ? 'active' : ''}"><span class="dot ${(prefs[p.id]?.pick || '').split(':')[0]}"></span>` +
     `<span class="n" title="${p.name}">${p.name}</span><span class="t">${p.versions.length > 1 ? p.versions.length + ' versions' : p.versions[0].set}</span></li>`).join('');
-  const done = photos.filter(p => prefs[p.id]?.pick).length;
-  $('count').textContent = `${done} / ${photos.length} picked`;
-  $('bar').style.width = (photos.length ? 100 * done / photos.length : 0) + '%';
+  const open = photos.filter(p => !prefs[p.id]?.done);
+  const picked = open.filter(p => prefs[p.id]?.pick).length;
+  $('count').textContent = `${picked} / ${open.length} picked · ${photos.length - open.length} finished`;
+  $('bar').style.width = (open.length ? 100 * picked / open.length : 0) + '%';
 }
 
 function render() {

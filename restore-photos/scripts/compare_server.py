@@ -17,6 +17,10 @@ Settings (arguments win, else ~/.config/photo-restore/compare.env):
                      photo instead of as sets of their own (comma-separated
                      sub-folder names, default "Higgsfield,Higgsfield 2")
 
+A photo whose pick has "done": true (set by the agent once the chosen
+version is back in the photo library) is hidden unless the page's filter
+asks for finished photos.
+
 A results folder is one set when it holds restored/ itself, and one set per
 sub-folder that holds restored/ (tiers, re-run rounds "Round N" - newest
 first). A set's own originals/ folder wins over COMPARE_ORIGINALS.
